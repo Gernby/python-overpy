@@ -153,8 +153,7 @@ class Overpass(object):
                     raise e
                 retry_exceptions.append(e)
                 continue
-
-            if r.status_code == 400:
+            elif r.status_code == 400:
                 msgs = []
                 for msg in self._regex_extract_error_msg.finditer(response):
                     tmp = self._regex_remove_tag.sub(b"", msg.group("msg"))
@@ -172,21 +171,20 @@ class Overpass(object):
                     raise e
                 retry_exceptions.append(e)
                 continue
-
-            if r.status_code == 429:
+            elif r.status_code == 429:
                 e = exception.OverpassTooManyRequests
                 if not do_retry:
                     raise e
                 retry_exceptions.append(e)
                 continue
-
-            if r.status_code == 504:
+            elif r.status_code == 504:
                 e = exception.OverpassGatewayTimeout
                 if not do_retry:
                     raise e
                 retry_exceptions.append(e)
                 continue
 
+            # No valid response code
             e = exception.OverpassUnknownHTTPStatusCode(r.status_code)
             if not do_retry:
                 raise e
