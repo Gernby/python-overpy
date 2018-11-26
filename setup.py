@@ -44,7 +44,7 @@ setup(
         "Programming Language :: Python :: Implementation :: PyPy"
     ],
     keywords="OverPy Overpass OSM OpenStreetMap",
-    install_requires=[],
+    install_requires=["requests"],
     packages=find_packages(exclude=["*.tests", "*.tests.*"]),
     include_package_data=True,
     package_data={

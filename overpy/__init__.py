@@ -6,6 +6,7 @@ import json
 import re
 import sys
 import time
+import requests
 
 from overpy import exception
 from overpy.__about__ import (
@@ -28,13 +29,6 @@ GLOBAL_ATTRIBUTE_MODIFIERS = {
     "version": int,
     "visible": lambda v: v.lower() == "true"
 }
-
-if PY2:
-    from urllib2 import urlopen
-    from urllib2 import HTTPError
-elif PY3:
-    from urllib.request import urlopen
-    from urllib.error import HTTPError
 
 
 def is_valid_type(element, cls):
@@ -61,7 +55,7 @@ class Overpass(object):
     default_retry_timeout = 1.0
     default_url = "http://overpass-api.de/api/interpreter"
 
-    def __init__(self, read_chunk_size=None, url=None, xml_parser=XML_PARSER_SAX, max_retry_count=None, retry_timeout=None):
+    def __init__(self, read_chunk_size=None, url=None, xml_parser=XML_PARSER_SAX, max_retry_count=None, retry_timeout=None, timeout=5.0, headers=None):
         """
         :param read_chunk_size: Max size of each chunk read from the server response
         :type read_chunk_size: Integer
@@ -73,6 +67,10 @@ class Overpass(object):
         :type max_retry_count: Integer
         :param retry_timeout: Time to wait between tries (Default: default_retry_timeout)
         :type retry_timeout: float
+        :param timeout: HTTP request timeout
+        :type timeout: float
+        :param headers: HTTP request headers
+        :type headers: dict
         """
         self.url = self.default_url
         if url is not None:
@@ -93,6 +91,8 @@ class Overpass(object):
         self.retry_timeout = retry_timeout
 
         self.xml_parser = xml_parser
+        self.timeout = timeout
+        self.headers = headers
 
     def _handle_remark_msg(self, msg):
         """
@@ -128,25 +128,19 @@ class Overpass(object):
             if retry_num > 0:
                 time.sleep(self.retry_timeout)
             retry_num += 1
+
             try:
-                f = urlopen(self.url, query)
-            except HTTPError as e:
-                f = e
-
-            response = f.read(self.read_chunk_size)
-            while True:
-                data = f.read(self.read_chunk_size)
-                if len(data) == 0:
-                    break
-                response = response + data
-            f.close()
-
-            if f.code == 200:
-                if PY2:
-                    http_info = f.info()
-                    content_type = http_info.getheader("content-type")
+                if self.headers is not None:
+                    r = requests.post(self.url, query, timeout=self.timeout, headers=self.headers)
                 else:
-                    content_type = f.getheader("Content-Type")
+                    r = requests.post(self.url, query, timeout=self.timeout)
+                response = r.content
+            except requests.exceptions.BaseHTTPError as e:
+                retry_exceptions.append(e)
+                continue
+
+            if r.status_code == 200:
+                content_type = r.headers["Content-Type"]
 
                 if content_type == "application/json":
                     return self.parse_json(response)
@@ -160,7 +154,7 @@ class Overpass(object):
                 retry_exceptions.append(e)
                 continue
 
-            if f.code == 400:
+            if r.status_code == 400:
                 msgs = []
                 for msg in self._regex_extract_error_msg.finditer(response):
                     tmp = self._regex_remove_tag.sub(b"", msg.group("msg"))
@@ -179,21 +173,21 @@ class Overpass(object):
                 retry_exceptions.append(e)
                 continue
 
-            if f.code == 429:
+            if r.status_code == 429:
                 e = exception.OverpassTooManyRequests
                 if not do_retry:
                     raise e
                 retry_exceptions.append(e)
                 continue
 
-            if f.code == 504:
+            if r.status_code == 504:
                 e = exception.OverpassGatewayTimeout
                 if not do_retry:
                     raise e
                 retry_exceptions.append(e)
                 continue
 
-            e = exception.OverpassUnknownHTTPStatusCode(f.code)
+            e = exception.OverpassUnknownHTTPStatusCode(r.status_code)
             if not do_retry:
                 raise e
             retry_exceptions.append(e)
@@ -213,7 +207,8 @@ class Overpass(object):
         :rtype: overpy.Result
         """
         if isinstance(data, bytes):
-            data = data.decode(encoding)
+          data = data.decode(encoding)
+
         data = json.loads(data, parse_float=Decimal)
         if "remark" in data:
             self._handle_remark_msg(msg=data.get("remark"))
@@ -231,7 +226,6 @@ class Overpass(object):
         """
         if parser is None:
             parser = self.xml_parser
-
         if isinstance(data, bytes):
             data = data.decode(encoding)
         if PY2 and not isinstance(data, str):
@@ -362,7 +356,7 @@ class Result(object):
     def from_xml(cls, data, api=None, parser=None):
         """
         Create a new instance and load data from xml data or object.
-        
+
         .. note::
             If parser is set to None, the functions tries to find the best parse.
             By default the SAX parser is chosen if a string is provided as data.
