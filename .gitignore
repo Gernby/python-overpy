@@ -2,6 +2,7 @@ __pycache__
 *.pyc
 *.pyo
 *.swp
+.eggs/
 /build/
 /dist/
 /docs/build/
